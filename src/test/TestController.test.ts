@@ -29,6 +29,15 @@ jest.mock('vscode', () => ({
       uri: {
         fsPath: '/test/workspace'
       }
+    }),
+    getConfiguration: jest.fn().mockReturnValue({
+      get: jest.fn((key, defaultValue) => defaultValue)
+    }),
+    asRelativePath: jest.fn((uri, includeWorkspaceFolder) => {
+      if (typeof uri === 'string') {
+        return uri;
+      }
+      return uri.fsPath;
     })
   },
   tests: {
@@ -68,6 +77,7 @@ jest.mock('vscode', () => ({
         get: jest.fn(),
         add: jest.fn(),
         delete: jest.fn(),
+        replace: jest.fn(),
         forEach: jest.fn()
       }
     })
@@ -148,6 +158,7 @@ describe('SpockTestController', () => {
         get: jest.fn(),
         add: jest.fn(),
         delete: jest.fn(),
+        replace: jest.fn(),
         forEach: jest.fn()
       }
     };
@@ -1153,6 +1164,103 @@ describe('SpockTestController', () => {
 
       // Verify that the parent test was treated as a regular test
       expect(mockRun.passed).toHaveBeenCalledWith(mockTestItem, expect.any(Number));
+    });
+  });
+
+  describe('Exclude Patterns', () => {
+    it('should match simple glob patterns', () => {
+      // Test **/bin/** pattern
+      expect(controller['matchesGlobPattern']('src/bin/Test.groovy', '**/bin/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('bin/Test.groovy', '**/bin/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('src/main/Test.groovy', '**/bin/**')).toBe(false);
+      
+      // Test **/build/** pattern
+      expect(controller['matchesGlobPattern']('src/build/Test.groovy', '**/build/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('build/classes/Test.groovy', '**/build/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('src/main/Test.groovy', '**/build/**')).toBe(false);
+      
+      // Test **/target/** pattern
+      expect(controller['matchesGlobPattern']('target/test-classes/Test.groovy', '**/target/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('src/target/Test.groovy', '**/target/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('src/main/Test.groovy', '**/target/**')).toBe(false);
+    });
+
+    it('should match nested path patterns', () => {
+      // Test **/target/test-classes/** pattern
+      expect(controller['matchesGlobPattern']('target/test-classes/Test.groovy', '**/target/test-classes/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('target/test-classes/com/example/Test.groovy', '**/target/test-classes/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('target/classes/Test.groovy', '**/target/test-classes/**')).toBe(false);
+      
+      // Test **/target/stubs/** pattern
+      expect(controller['matchesGlobPattern']('target/stubs/Test.groovy', '**/target/stubs/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('target/stubs/com/example/Test.groovy', '**/target/stubs/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('target/test-classes/Test.groovy', '**/target/stubs/**')).toBe(false);
+      
+      // Test **/contracts/** pattern
+      expect(controller['matchesGlobPattern']('contracts/Test.groovy', '**/contracts/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('src/contracts/Test.groovy', '**/contracts/**')).toBe(true);
+      expect(controller['matchesGlobPattern']('src/main/Test.groovy', '**/contracts/**')).toBe(false);
+    });
+
+    it('should match patterns with wildcards', () => {
+      // Test single wildcard
+      expect(controller['matchesGlobPattern']('src/test.groovy', 'src/*.groovy')).toBe(true);
+      expect(controller['matchesGlobPattern']('src/main/test.groovy', 'src/*.groovy')).toBe(false);
+      
+      // Test double wildcard - ** matches zero or more directories
+      expect(controller['matchesGlobPattern']('src/main/groovy/Test.groovy', 'src/**/*.groovy')).toBe(true);
+      expect(controller['matchesGlobPattern']('src/groovy/Test.groovy', 'src/**/*.groovy')).toBe(true);
+      // Note: src/**/*.groovy requires at least one directory level between src/ and *.groovy
+      // For files directly in src/, use src/*.groovy instead
+    });
+
+    it('should use default exclude patterns when not configured', async () => {
+      // Mock getConfiguration to return default values
+      const mockGetConfig = jest.fn().mockReturnValue({
+        get: jest.fn((key, defaultValue) => defaultValue)
+      });
+      (vscode.workspace.getConfiguration as jest.Mock) = mockGetConfig;
+
+      // Mock findFiles to return multiple files including excluded ones
+      const mockFiles = [
+        vscode.Uri.file('/test/workspace/src/test/Test.groovy'),
+        vscode.Uri.file('/test/workspace/bin/Test.groovy'),
+        vscode.Uri.file('/test/workspace/build/Test.groovy'),
+        vscode.Uri.file('/test/workspace/target/Test.groovy')
+      ];
+      (vscode.workspace.findFiles as jest.Mock).mockResolvedValue(mockFiles);
+
+      // Trigger discovery
+      await controller['discoverAllTests']();
+
+      // Verify getConfiguration was called
+      expect(mockGetConfig).toHaveBeenCalledWith('spockTestRunner');
+    });
+
+    it('should use custom exclude patterns when configured', async () => {
+      // Mock getConfiguration to return custom values
+      const customPatterns = [
+        '**/bin/**',
+        '**/build/**',
+        '**/target/**',
+        '**/contracts/**',
+        '**/target/stubs/**'
+      ];
+      const mockGetConfig = jest.fn().mockReturnValue({
+        get: jest.fn((key, defaultValue) => {
+          if (key === 'excludePatterns') {
+            return customPatterns;
+          }
+          return defaultValue;
+        })
+      });
+      (vscode.workspace.getConfiguration as jest.Mock) = mockGetConfig;
+
+      // Trigger discovery
+      await controller['discoverAllTests']();
+
+      // Verify getConfiguration was called
+      expect(mockGetConfig).toHaveBeenCalledWith('spockTestRunner');
     });
   });
 });

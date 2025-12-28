@@ -110,6 +110,25 @@ The extension automatically creates debug configurations for your project. You c
 }
 ```
 
+### Exclude Patterns
+
+You can configure which directories to exclude from test discovery using glob patterns in your workspace settings:
+
+```json
+{
+  "spockTestRunner.excludePatterns": [
+    "**/bin/**",
+    "**/build/**",
+    "**/target/**",
+    "**/target/test-classes/**",
+    "**/target/stubs/**",
+    "**/contracts/**"
+  ]
+}
+```
+
+By default, the extension excludes `**/bin/**`, `**/build/**`, and `**/target/**` directories from test discovery. You can customize this list to exclude additional directories as needed.
+
 ## Sample Project
 
 A sample Gradle project with Spock tests is included in the `sample-project` directory. This project demonstrates:
