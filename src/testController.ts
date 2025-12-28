@@ -14,6 +14,9 @@ export class SpockTestController {
   private testExecutionService: TestExecutionService;
   private testResultParser: TestResultParser;
   private iterationItems = new Map<string, vscode.TestItem[]>(); // Track iteration items by file URI
+  
+  // Default exclude patterns for test discovery
+  private static readonly DEFAULT_EXCLUDE_PATTERNS = ['**/bin/**', '**/build/**', '**/target/**'];
 
   constructor(context: vscode.ExtensionContext, logger: vscode.OutputChannel) {
     this.logger = logger;
@@ -84,24 +87,14 @@ export class SpockTestController {
 
       watcher.onDidCreate(uri => {
         // Check if file matches any exclude patterns
-        const config = vscode.workspace.getConfiguration('spockTestRunner');
-        const excludePatterns: string[] = config.get('excludePatterns', ['**/bin/**', '**/build/**', '**/target/**']);
-        const relativePath = vscode.workspace.asRelativePath(uri, false);
-        const isExcluded = excludePatterns.some(pattern => this.matchesGlobPattern(relativePath, pattern));
-        
-        if (!isExcluded) {
+        if (!this.isFileExcluded(uri)) {
           this.logger.appendLine(`SpockTestController: File created: ${uri.fsPath}`);
           this.discoverTestsInFile(this.getOrCreateFile(uri));
         }
       });
       watcher.onDidChange(uri => {
         // Check if file matches any exclude patterns
-        const config = vscode.workspace.getConfiguration('spockTestRunner');
-        const excludePatterns: string[] = config.get('excludePatterns', ['**/bin/**', '**/build/**', '**/target/**']);
-        const relativePath = vscode.workspace.asRelativePath(uri, false);
-        const isExcluded = excludePatterns.some(pattern => this.matchesGlobPattern(relativePath, pattern));
-        
-        if (!isExcluded) {
+        if (!this.isFileExcluded(uri)) {
           this.logger.appendLine(`SpockTestController: File changed: ${uri.fsPath}`);
           this.discoverTestsInFile(this.getOrCreateFile(uri));
         }
@@ -151,6 +144,16 @@ export class SpockTestController {
     context.subscriptions.push(reloadCommand, refreshCommand);
   }
 
+  /**
+   * Check if a file should be excluded based on configured exclude patterns
+   */
+  private isFileExcluded(uri: vscode.Uri): boolean {
+    const config = vscode.workspace.getConfiguration('spockTestRunner');
+    const excludePatterns: string[] = config.get('excludePatterns', SpockTestController.DEFAULT_EXCLUDE_PATTERNS);
+    const relativePath = vscode.workspace.asRelativePath(uri, false);
+    return excludePatterns.some(pattern => this.matchesGlobPattern(relativePath, pattern));
+  }
+
   private async discoverAllTests(): Promise<void> {
     this.logger.appendLine('SpockTestController: discoverAllTests called');
     
@@ -167,7 +170,7 @@ export class SpockTestController {
     
     // Get exclude patterns from configuration
     const config = vscode.workspace.getConfiguration('spockTestRunner');
-    const excludePatterns: string[] = config.get('excludePatterns', ['**/bin/**', '**/build/**', '**/target/**']);
+    const excludePatterns: string[] = config.get('excludePatterns', SpockTestController.DEFAULT_EXCLUDE_PATTERNS);
     
     this.logger.appendLine(`SpockTestRunner: Using exclude patterns: ${excludePatterns.join(', ')}`);
     
