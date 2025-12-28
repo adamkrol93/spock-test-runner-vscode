@@ -32,6 +32,19 @@
     "workspaceContains:**/*.groovy"
   ],
   "contributes": {
+    "configuration": {
+      "title": "Spock Test Runner",
+      "properties": {
+        "spockTestRunner.excludePatterns": {
+          "type": "array",
+          "default": ["**/bin/**", "**/build/**", "**/target/**"],
+          "description": "Glob patterns to exclude from test discovery",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
     "commands": [
       {
         "command": "spock-test-runner-vscode.runTest",

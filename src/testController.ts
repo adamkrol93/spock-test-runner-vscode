@@ -83,15 +83,25 @@ export class SpockTestController {
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
 
       watcher.onDidCreate(uri => {
-        // Only process files that are NOT in the bin directory
-        if (!uri.fsPath.includes('/bin/')) {
+        // Check if file matches any exclude patterns
+        const config = vscode.workspace.getConfiguration('spockTestRunner');
+        const excludePatterns: string[] = config.get('excludePatterns', ['**/bin/**', '**/build/**', '**/target/**']);
+        const relativePath = vscode.workspace.asRelativePath(uri, false);
+        const isExcluded = excludePatterns.some(pattern => this.matchesGlobPattern(relativePath, pattern));
+        
+        if (!isExcluded) {
           this.logger.appendLine(`SpockTestController: File created: ${uri.fsPath}`);
           this.discoverTestsInFile(this.getOrCreateFile(uri));
         }
       });
       watcher.onDidChange(uri => {
-        // Only process files that are NOT in the bin directory
-        if (!uri.fsPath.includes('/bin/')) {
+        // Check if file matches any exclude patterns
+        const config = vscode.workspace.getConfiguration('spockTestRunner');
+        const excludePatterns: string[] = config.get('excludePatterns', ['**/bin/**', '**/build/**', '**/target/**']);
+        const relativePath = vscode.workspace.asRelativePath(uri, false);
+        const isExcluded = excludePatterns.some(pattern => this.matchesGlobPattern(relativePath, pattern));
+        
+        if (!isExcluded) {
           this.logger.appendLine(`SpockTestController: File changed: ${uri.fsPath}`);
           this.discoverTestsInFile(this.getOrCreateFile(uri));
         }
@@ -155,11 +165,31 @@ export class SpockTestController {
 
     this.logger.appendLine(`SpockTestController: Found ${vscode.workspace.workspaceFolders.length} workspace folders`);
     
+    // Get exclude patterns from configuration
+    const config = vscode.workspace.getConfiguration('spockTestRunner');
+    const excludePatterns: string[] = config.get('excludePatterns', ['**/bin/**', '**/build/**', '**/target/**']);
+    
+    this.logger.appendLine(`SpockTestRunner: Using exclude patterns: ${excludePatterns.join(', ')}`);
+    
     for (const workspaceFolder of vscode.workspace.workspaceFolders) {
       this.logger.appendLine(`SpockTestController: Searching in workspace: ${workspaceFolder.uri.fsPath}`);
       const pattern = new vscode.RelativePattern(workspaceFolder, '**/*.groovy');
-      const excludePattern = new vscode.RelativePattern(workspaceFolder, '**/bin/**');
-      const files = await vscode.workspace.findFiles(pattern, excludePattern);
+      
+      // Build exclude pattern - VS Code findFiles accepts only one pattern, so we need to combine them
+      // We'll use the first pattern and filter manually for others
+      const primaryExclude = excludePatterns.length > 0 ? 
+        new vscode.RelativePattern(workspaceFolder, excludePatterns[0]) : 
+        undefined;
+      
+      let files = await vscode.workspace.findFiles(pattern, primaryExclude);
+      
+      // Manually filter files based on remaining exclude patterns
+      if (excludePatterns.length > 1) {
+        files = files.filter(file => {
+          const relativePath = vscode.workspace.asRelativePath(file, false);
+          return !excludePatterns.slice(1).some(pattern => this.matchesGlobPattern(relativePath, pattern));
+        });
+      }
       
       this.logger.appendLine(`SpockTestController: Found ${files.length} .groovy files`);
       
@@ -169,6 +199,41 @@ export class SpockTestController {
         await this.discoverTestsInFile(fileItem);
       }
     }
+  }
+
+  /**
+   * Simple glob pattern matcher for filtering files
+   * Supports: *, **, ?
+   */
+  private matchesGlobPattern(path: string, pattern: string): boolean {
+    // Normalize path separators to forward slashes
+    const normalizedPath = path.replace(/\\/g, '/');
+    
+    // Convert glob pattern to regex
+    // Important: escape dots BEFORE replacing ** and * to avoid interfering with the .* pattern
+    let regexPattern = pattern
+      .replace(/\\/g, '/')  // Normalize pattern separators
+      .replace(/\./g, '\\.')  // Escape dots FIRST
+      .replace(/\*\*/g, '<<DOUBLE_STAR>>')  // Replace ** with placeholder
+      .replace(/\*/g, '[^/]*')  // Replace * with match any except /
+      .replace(/<<DOUBLE_STAR>>/g, '.*')  // Replace placeholder with match any
+      .replace(/\?/g, '[^/]')  // Replace ? with match single char except /
+      .replace(/\//g, '\\/');  // Escape forward slashes
+    
+    // Handle patterns that start with **/ - they should match from the beginning OR after any path
+    if (pattern.startsWith('**/')) {
+      // Pattern like **/bin/** should match bin/** or anything/bin/**
+      regexPattern = regexPattern.replace(/^\.\*\\\//, '(.*\\/)?');
+    }
+    
+    const regex = new RegExp(`^${regexPattern}$`);
+    const matches = regex.test(normalizedPath);
+    
+    if (matches) {
+      this.logger.appendLine(`SpockTestRunner: File ${normalizedPath} matches exclude pattern ${pattern}`);
+    }
+    
+    return matches;
   }
 
   private async discoverTestsInFile(file: vscode.TestItem): Promise<void> {
